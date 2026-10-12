@@ -15,6 +15,8 @@ html,body{margin:0;padding:0;height:100%;background:#000;color:#fff;font-family:
   background:linear-gradient(rgba(0,0,0,.65),transparent);padding-bottom:26px}
 #ui .t{font-size:13px;font-weight:700;margin-right:auto;text-shadow:0 1px 3px #000}
 #ui a.home{color:#7dd3fc;text-decoration:none;font-size:12px;font-weight:700}
+#recenter{border:1px solid #7dd3fc;background:rgba(10,12,16,.6);color:#fff;font-size:12px;font-weight:700;
+  padding:8px 14px;border-radius:18px;cursor:pointer}
 #models{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;gap:8px;justify-content:center;
   padding:26px 12px 14px;background:linear-gradient(transparent,rgba(0,0,0,.65))}
 #models button{border:1px solid #7dd3fc;background:rgba(10,12,16,.6);color:#fff;font-size:13px;font-weight:600;
@@ -32,7 +34,7 @@ html,body{margin:0;padding:0;height:100%;background:#000;color:#fff;font-family:
 <body>
 <video id="cam" playsinline muted autoplay></video>
 <div id="gl"></div>
-<div id="ui"><a class="home" href="index.html">← Home</a><span class="t">Villa AR</span></div>
+<div id="ui"><a class="home" href="index.html">← Home</a><span class="t">Villa AR</span><button id="recenter">⌖ Centra</button></div>
 <div id="models">
   <button data-m="soggiorno" class="on">Soggiorno</button>
   <button data-m="villa">Villa unica</button>
@@ -69,6 +71,13 @@ const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
 
 const anchor=new THREE.Group(); scene.add(anchor); /* world-locked by gyro */
 let modelRoot=null, curDef=MODELS.soggiorno;
+function placeModel(){
+  const dir=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); dir.y=0;
+  if(dir.lengthSq()<1e-6) dir.set(0,0,-1);
+  dir.normalize();
+  anchor.position.copy(dir.multiplyScalar(curDef.dist)); anchor.position.y=-0.4;
+}
+document.getElementById('recenter').addEventListener('click',placeModel);
 function loadModel(def){
   say('Caricamento modello…',false);
   loader.load(def.url,(gltf)=>{
@@ -76,7 +85,7 @@ function loadModel(def){
     modelRoot=gltf.scene; modelRoot.scale.setScalar(def.scale);
     const b=new THREE.Box3().setFromObject(modelRoot), c=b.getCenter(new THREE.Vector3());
     modelRoot.position.x-=c.x; modelRoot.position.z-=c.z; modelRoot.position.y-=b.min.y;
-    anchor.add(modelRoot); hideMsg();
+    anchor.add(modelRoot); hideMsg(); placeModel();
   },undefined,()=>say('Errore di caricamento modello',false));
 }
 document.querySelectorAll('#models button').forEach(b=>b.addEventListener('click',()=>{
@@ -93,7 +102,7 @@ async function startCamera(){
 }
 /* gyro -> camera quaternion (3DOF AR) */
 const zee=new THREE.Vector3(0,0,1), euler=new THREE.Euler(), q0=new THREE.Quaternion(), q1=new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
-let gyroOK=false, placed=false;
+let gyroOK=false;
 function onOrient(e){
   if(e.alpha===null) return;
   gyroOK=true;
@@ -102,10 +111,6 @@ function onOrient(e){
   euler.set(b,a,-g,'YXZ'); camera.quaternion.setFromEuler(euler);
   camera.quaternion.multiply(q1);
   q0.setFromAxisAngle(zee,-orient); camera.quaternion.multiply(q0);
-  if(!placed){ placed=true; /* place model ahead on first fix */
-    const dir=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); dir.y=0; dir.normalize();
-    anchor.position.copy(dir.multiplyScalar(curDef.dist)); anchor.position.y=-0.4;
-  }
 }
 addEventListener('deviceorientation',onOrient);
 /* desktop fallback: drag to look */
