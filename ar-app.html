@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Villa AR</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+html,body{margin:0;padding:0;height:100%;background:#000;color:#fff;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
+#cam{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#gl{position:fixed;inset:0}
+#gl canvas{display:block;width:100%;height:100%}
+#ui{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;gap:8px;align-items:center;padding:10px 12px;
+  background:linear-gradient(rgba(0,0,0,.65),transparent);padding-bottom:26px}
+#ui .t{font-size:13px;font-weight:700;margin-right:auto;text-shadow:0 1px 3px #000}
+#ui a.home{color:#7dd3fc;text-decoration:none;font-size:12px;font-weight:700}
+#models{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;gap:8px;justify-content:center;
+  padding:26px 12px 14px;background:linear-gradient(transparent,rgba(0,0,0,.65))}
+#models button{border:1px solid #7dd3fc;background:rgba(10,12,16,.6);color:#fff;font-size:13px;font-weight:600;
+  padding:10px 16px;border-radius:20px;cursor:pointer}
+#models button.on{background:#7dd3fc;color:#06283a}
+#msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;background:rgba(10,12,16,.85);
+  border:1px solid #262b33;border-radius:12px;padding:16px 20px;font-size:13px;text-align:center;max-width:80%}
+#msg button{margin-top:10px;border:1px solid #7dd3fc;background:#7dd3fc;color:#06283a;font-weight:700;
+  font-size:14px;padding:10px 22px;border-radius:20px;cursor:pointer}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<video id="cam" playsinline muted autoplay></video>
+<div id="gl"></div>
+<div id="ui"><a class="home" href="index.html">← Home</a><span class="t">Villa AR</span></div>
+<div id="models">
+  <button data-m="soggiorno" class="on">Soggiorno</button>
+  <button data-m="villa">Villa unica</button>
+  <button data-m="esterno">Esterno</button>
+</div>
+<div id="msg" style="display:none"><div id="msg-t"></div><button id="msg-b">Attiva camera</button></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+const CDN='https://cdn.jsdelivr.net/gh/aledesogusbusiness-hue/hometour-demo-assets@main/';
+const MODELS={
+  soggiorno:{url:CDN+'soggiorno.glb',  scale:0.35, dist:3.2},
+  villa:    {url:CDN+'villa-unica.glb', scale:0.06, dist:6},
+  esterno:  {url:CDN+'esterno.glb',    scale:0.08, dist:8}
+};
+const msg=document.getElementById('msg'), msgT=document.getElementById('msg-t'), msgB=document.getElementById('msg-b');
+function say(t,btn){ msgT.textContent=t; msg.style.display='block'; msgB.style.display=btn?'':'none'; }
+function hideMsg(){ msg.style.display='none'; }
+
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.15;
+document.getElementById('gl').appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.05,200);
+scene.add(new THREE.HemisphereLight(0xffffff,0x667788,1.0));
+const sun=new THREE.DirectionalLight(0xfff2e0,1.6); sun.position.set(5,10,7); scene.add(sun);
+const draco=new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
+
+const anchor=new THREE.Group(); scene.add(anchor); /* world-locked by gyro */
+let modelRoot=null, curDef=MODELS.soggiorno;
+function loadModel(def){
+  say('Caricamento modello…',false);
+  loader.load(def.url,(gltf)=>{
+    if(modelRoot){ anchor.remove(modelRoot); }
+    modelRoot=gltf.scene; modelRoot.scale.setScalar(def.scale);
+    const b=new THREE.Box3().setFromObject(modelRoot), c=b.getCenter(new THREE.Vector3());
+    modelRoot.position.x-=c.x; modelRoot.position.z-=c.z; modelRoot.position.y-=b.min.y;
+    anchor.add(modelRoot); hideMsg();
+  },undefined,()=>say('Errore di caricamento modello',false));
+}
+document.querySelectorAll('#models button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('#models button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+  curDef=MODELS[b.dataset.m]; loadModel(curDef);
+}));
+
+/* camera */
+async function startCamera(){
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
+    document.getElementById('cam').srcObject=s; hideMsg(); return true;
+  }catch(e){ say('Consenti l\u2019accesso alla camera per la realtà aumentata.',false); return false; }
+}
+/* gyro -> camera quaternion (3DOF AR) */
+const zee=new THREE.Vector3(0,0,1), euler=new THREE.Euler(), q0=new THREE.Quaternion(), q1=new THREE.Quaternion(-Math.sqrt(0.5),0,0,Math.sqrt(0.5));
+let gyroOK=false, placed=false;
+function onOrient(e){
+  if(e.alpha===null) return;
+  gyroOK=true;
+  const a=e.alpha*Math.PI/180, b=e.beta*Math.PI/180, g=e.gamma*Math.PI/180;
+  const orient=(screen.orientation&&screen.orientation.angle||0)*Math.PI/180;
+  euler.set(b,a,-g,'YXZ'); camera.quaternion.setFromEuler(euler);
+  camera.quaternion.multiply(q1);
+  q0.setFromAxisAngle(zee,-orient); camera.quaternion.multiply(q0);
+  if(!placed){ placed=true; /* place model ahead on first fix */
+    const dir=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion); dir.y=0; dir.normalize();
+    anchor.position.copy(dir.multiplyScalar(curDef.dist)); anchor.position.y=-0.4;
+  }
+}
+addEventListener('deviceorientation',onOrient);
+/* desktop fallback: drag to look */
+let lx=0,ly=0,drag=false,myaw=0,mpitch=0;
+addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;});
+addEventListener('pointerup',()=>drag=false);
+addEventListener('pointermove',e=>{ if(!drag||gyroOK)return; myaw-=(e.clientX-lx)*0.005; mpitch=Math.max(-1.2,Math.min(1.2,mpitch-(e.clientY-ly)*0.004)); lx=e.clientX; ly=e.clientY;
+  camera.quaternion.setFromEuler(new THREE.Euler(mpitch,myaw,0,'YXZ')); });
+addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+msgB.addEventListener('click',async()=>{ hideMsg(); await startCamera(); });
+(async()=>{
+  if(!('mediaDevices' in navigator)){ say('Browser senza accesso camera.',false); return; }
+  say('Tocca per attivare la camera.',true);
+  if(typeof DeviceOrientationEvent!=='undefined' && DeviceOrientationEvent.requestPermission){
+    const r=await DeviceOrientationEvent.requestPermission().catch(()=>null);
+    if(r!=='granted') say('Consenti l\u2019accesso al giroscopio per l\u2019AR.',false);
+  }
+})();
+loadModel(curDef);
+(function tick(){ requestAnimationFrame(tick); renderer.render(scene,camera); })();
+</script>
+</body>
+</html>

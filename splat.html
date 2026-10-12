@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Tour Splat — HomeTourAI AR</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+html,body{margin:0;padding:0;height:100%;background:#000;color:#fff;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+#top{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;align-items:center;gap:10px;padding:10px 12px;
+  background:linear-gradient(rgba(0,0,0,.7),transparent);padding-bottom:28px}
+#top .t{font-size:14px;font-weight:700;margin-right:auto;text-shadow:0 1px 3px #000}
+#top a.home{color:#7dd3fc;text-decoration:none;font-size:12px;font-weight:700}
+#rooms{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;gap:8px;justify-content:flex-start;overflow-x:auto;
+  padding:28px 12px 14px;background:linear-gradient(transparent,rgba(0,0,0,.7))}
+#rooms button{flex:0 0 auto;border:1px solid #7dd3fc;background:rgba(10,12,16,.6);color:#fff;font-size:13px;font-weight:600;
+  padding:10px 16px;border-radius:20px;cursor:pointer;white-space:nowrap}
+#rooms button.on{background:#7dd3fc;color:#06283a}
+#load{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9;background:rgba(10,12,16,.85);
+  border:1px solid #262b33;border-radius:12px;padding:16px 22px;font-size:13px;display:none}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/babylonjs@8.39.0/babylon.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@8.39.0/babylonjs.loaders.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="top"><a class="home" href="index.html">← Home</a><span class="t" id="roomname">Living Room</span></div>
+<div id="rooms"></div>
+<div id="load"><span id="loadmsg">Caricamento…</span></div>
+<script>
+const CDN='https://cdn.jsdelivr.net/gh/aledesogusbusiness-hue/hometour-demo-assets@main/';
+const ROOMS=[
+  {id:'living-room', name:'Soggiorno'},
+  {id:'kitchen',     name:'Cucina'},
+  {id:'hallway',     name:'Corridoio'},
+  {id:'bedroom1',    name:'Camera 1'},
+  {id:'bedroom2',    name:'Camera 2'},
+  {id:'bathroom1',   name:'Bagno 1'},
+  {id:'bathroom2',   name:'Bagno 2'},
+];
+const canvas=document.getElementById('c'), loadEl=document.getElementById('load'), loadMsg=document.getElementById('loadmsg'),
+      roomName=document.getElementById('roomname'), roomsEl=document.getElementById('rooms');
+const engine=new BABYLON.Engine(canvas,true,{stencil:true});
+const scene=new BABYLON.Scene(engine);
+const camera=new BABYLON.ArcRotateCamera('cam',Math.PI*0.8,1.05,14,new BABYLON.Vector3(0,1.6,0),scene);
+camera.attachControl(canvas,true);
+camera.lowerRadiusLimit=2; camera.upperRadiusLimit=40;
+camera.wheelPrecision=20; camera.pinchPrecision=60;
+let curMeshes=[];
+function clearRoom(){ curMeshes.forEach(m=>m.dispose()); curMeshes=[]; }
+function frameMeshes(){
+  if(!curMeshes.length) return;
+  const b=new BABYLON.Vector3(1e9,1e9,1e9), b2=new BABYLON.Vector3(-1e9,-1e9,-1e9);
+  curMeshes.forEach(m=>{ const bb=m.getBoundingInfo().boundingBox; b.x=Math.min(b.x,bb.minimumWorld.x); b.y=Math.min(b.y,bb.minimumWorld.y); b.z=Math.min(b.z,bb.minimumWorld.z);
+    b2.x=Math.max(b2.x,bb.maximumWorld.x); b2.y=Math.max(b2.y,bb.maximumWorld.y); b2.z=Math.max(b2.z,bb.maximumWorld.z); });
+  const c=b.add(b2).scale(0.5), size=b2.subtract(b).length();
+  camera.setTarget(c); camera.radius=Math.max(6,size*0.9);
+}
+function loadRoom(r){
+  clearRoom(); loadEl.style.display='block'; loadMsg.textContent='Caricamento '+r.name+'…'; roomName.textContent=r.name;
+  document.querySelectorAll('#rooms button').forEach(x=>x.classList.toggle('on',x.dataset.id===r.id));
+  BABYLON.SceneLoader.ImportMesh('',CDN,r.id+'.sog',scene,
+    (meshes)=>{ curMeshes=meshes; frameMeshes(); loadEl.style.display='none'; },
+    (evt)=>{ if(evt&&evt.lengthComputable&&evt.total) loadMsg.textContent='Caricamento '+r.name+'… '+Math.round(evt.loaded/evt.total*100)+'%'; },
+    (s,m,ex)=>{ loadMsg.textContent='Errore di caricamento'; console.error(m,ex); }, '.sog');
+}
+ROOMS.forEach(r=>{ const b=document.createElement('button'); b.textContent=r.name; b.dataset.id=r.id;
+  b.addEventListener('click',()=>loadRoom(r)); roomsEl.appendChild(b); });
+engine.runRenderLoop(()=>scene.render());
+addEventListener('resize',()=>engine.resize());
+loadRoom(ROOMS[0]);
+</script>
+</body>
+</html>

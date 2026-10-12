@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Villa — naviga dentro</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b0d10">
+<style>
+html,body{margin:0;padding:0;height:100%;background:#0b0d10;color:#fff;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
+#vw{height:100dvh;display:flex;flex-direction:column}
+.topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#14171c;border-bottom:1px solid #262b33}
+.topbar .loc{font-size:14px;font-weight:700}
+.topbar .hint{font-size:11px;color:#9aa3ad}
+.topbar a.home{color:#7dd3fc;text-decoration:none;font-size:12px;font-weight:700}
+.stage{position:relative;flex:1;background:#101012;overflow:hidden;touch-action:none}
+.stage canvas{display:block;width:100%;height:100%}
+.loader{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#eee;background:#101012;z-index:8;transition:opacity .3s}
+.loader.done{opacity:0;pointer-events:none}
+.spin{width:38px;height:38px;border:4px solid #333;border-top-color:#7dd3fc;border-radius:50%;animation:vwsp 1s linear infinite}
+@keyframes vwsp{to{transform:rotate(360deg)}}
+.fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .28s;z-index:7}
+.fade.on{opacity:1}
+.marker{position:absolute;transform:translate(-50%,-50%);z-index:5;background:rgba(20,22,26,.85);border:1px solid #7dd3fc;color:#fff;font-size:13px;font-weight:600;padding:10px 14px;border-radius:20px;cursor:pointer;white-space:nowrap}
+.marker:active{transform:translate(-50%,-50%) scale(.94)}
+.tapdot{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border:2px solid #7dd3fc;border-radius:50%;z-index:5;pointer-events:none;animation:vwfade .8s ease-out forwards}
+@keyframes vwfade{from{opacity:1;transform:scale(.4)}to{opacity:0;transform:scale(1.4)}}
+.bar{padding:10px 14px;background:#14171c;border-top:1px solid #262b33}
+.bar .t{font-size:13px;font-weight:700}
+.bar .s{font-size:11px;color:#9aa3ad;margin-top:2px}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="vw">
+  <div class="topbar"><a class="home" href="index.html">← Home</a><div class="loc" id="vw-loc">Villa</div><div class="hint">Tocca per muoverti · trascina per guardarti</div></div>
+  <div class="stage" id="vw-stage">
+    <div class="loader" id="vw-loader"><div class="spin"></div><div id="vw-lmsg" style="font-size:12px">Caricamento…</div></div>
+    <div class="fade" id="vw-fade"></div>
+    <div id="vw-markers"></div>
+  </div>
+  <div class="bar"><div class="t" id="vw-title"></div><div class="s" id="vw-sub"></div></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+const CDN = "https://cdn.jsdelivr.net/gh/aledesogusbusiness-hue/hometour-demo-assets@main/";
+const SCENES = {
+  esterno:   {url:CDN+"esterno.glb",    scale:0.5,  eye:1.7, name:"Esterno — Villa",
+              sub:"Villa vittoriana · tocca il giardino per muoverti, poi entra",
+              bounds:[-12,17,12,26], spawn:{x:0,z:21,yaw:0}},
+  soggiorno: {url:CDN+"soggiorno.glb",  scale:1,    eye:1.6, name:"Soggiorno",
+              sub:"The White Room · Jay-Artist (CC-BY-3.0)",
+              bounds:[-2.2,-3.2,2.2,3.2], spawn:{x:0,z:2.7,yaw:0}},
+  cucina:    {url:CDN+"cucina.glb",     scale:1,    eye:1.6, name:"Cucina",
+              sub:"Country Kitchen · Jay-Artist (CC-BY-3.0)",
+              bounds:[-2.8,-3.6,2.8,3.6], spawn:{x:0,z:3.0,yaw:0}},
+  soggiorno2:{url:CDN+"soggiorno2.glb", scale:1,    eye:1.6, name:"Soggiorno 2",
+              sub:"Grey & White Room · Wig42 (CC-BY-3.0)",
+              bounds:[-2.2,-1.5,2.2,1.5], spawn:{x:0,z:1.5,yaw:0}},
+  salapranzo:{url:CDN+"sala-pranzo.glb",scale:0.4,  eye:1.6, name:"Sala pranzo",
+              sub:"Breakfast Room · Wig42 (CC-BY-3.0)",
+              bounds:[-1.8,-2.4,1.8,2.4], spawn:{x:0,z:2.05,yaw:0}},
+  bagno:     {url:CDN+"bagno.glb",      scale:1,    eye:1.6, name:"Bagno",
+              sub:"Contemporary Bathroom · Mareck (CC0)",
+              bounds:[-2.1,-0.7,2.1,0.7], spawn:{x:0,z:0.85,yaw:0}},
+  scala:     {url:CDN+"scala.glb",      scale:1,    eye:1.6, name:"Scala",
+              sub:"Wooden Staircase · Wig42 (CC-BY-3.0)",
+              bounds:[-2.7,-4.5,2.7,4.5], spawn:{x:0,z:3.6,yaw:0}},
+  ingresso:  {url:CDN+"ingresso.glb",   scale:0.5,  eye:1.6, name:"Ingresso",
+              sub:"Hall d'ingresso · NewSee2l035 (CC-BY-3.0)",
+              focus:[-3.5,2.0], dy:-1.86,
+              bounds:[-4.8,-2.2,4.8,2.2], spawn:{x:3.5,z:0,yaw:Math.PI/2}},
+};
+const DOORS = [
+  {from:"esterno", at:[0,17.5], to:"soggiorno",  label:"Entra in casa"},
+  {from:"soggiorno",at:[1.8,3.2],to:"esterno",   label:"Esci in giardino"},
+  {from:"soggiorno",at:[2.5,-1],to:"cucina",     label:"Cucina"},
+  {from:"cucina",  at:[0,-3.2],to:"soggiorno",  label:"Soggiorno"},
+  {from:"cucina",  at:[-2.4,0],to:"salapranzo", label:"Sala pranzo"},
+  {from:"salapranzo",at:[0,-2],to:"cucina",     label:"Cucina"},
+  {from:"soggiorno",at:[-2.5,-1],to:"soggiorno2",label:"Soggiorno 2"},
+  {from:"soggiorno2",at:[0,-1.1],to:"soggiorno", label:"Soggiorno"},
+  {from:"soggiorno",at:[-1.8,3.2],to:"bagno",   label:"Bagno"},
+  {from:"bagno",   at:[0,-0.4],to:"soggiorno",  label:"Soggiorno"},
+  {from:"soggiorno",at:[1.5,-3.2],to:"scala",   label:"Scala"},
+  {from:"scala",   at:[0,-4.1],to:"soggiorno",  label:"Soggiorno"},
+  {from:"soggiorno",at:[-1.5,-3.2],to:"ingresso",label:"Ingresso"},
+  {from:"ingresso",at:[-4.4,0],to:"soggiorno",  label:"Soggiorno"},
+];
+
+const stage=document.getElementById('vw-stage'), loaderEl=document.getElementById('vw-loader'),
+      lmsg=document.getElementById('vw-lmsg'), fade=document.getElementById('vw-fade'),
+      markersEl=document.getElementById('vw-markers'), locEl=document.getElementById('vw-loc'),
+      titleEl=document.getElementById('vw-title'), subEl=document.getElementById('vw-sub');
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.1;
+stage.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x101012);
+const camera=new THREE.PerspectiveCamera(68,1,0.05,400);
+scene.add(new THREE.HemisphereLight(0xffffff,0x445566,0.75));
+const sun=new THREE.DirectionalLight(0xfff2e0,1.2); sun.position.set(8,14,6); scene.add(sun);
+const draco=new DRACOLoader(); draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
+const raycaster=new THREE.Raycaster();
+
+let cur=null, curRoot=null, yaw=0, pitch=0, px=0, pz=0, tapTarget=null;
+const keys={};
+function setLoc(id){ locEl.textContent=SCENES[id].name; titleEl.textContent=SCENES[id].name; subEl.textContent=SCENES[id].sub; }
+function disposeRoot(){ if(!curRoot) return;
+  curRoot.traverse(o=>{ if(o.geometry)o.geometry.dispose();
+    if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{ for(const k in m){const v=m[k]; if(v&&v.isTexture)v.dispose();} m.dispose(); }); });
+  scene.remove(curRoot); curRoot=null; }
+function centerRoot(root, S){ const b=new THREE.Box3().setFromObject(root); const c=b.getCenter(new THREE.Vector3());
+  const fx = S.focus ? S.focus[0]*S.scale : c.x, fz = S.focus ? S.focus[1]*S.scale : c.z;
+  root.position.x-=fx; root.position.z-=fz;
+  const b2=new THREE.Box3().setFromObject(root); root.position.y-=b2.min.y;
+  if(S.dy) root.position.y+=S.dy; }
+
+function loadScene(id){
+  const S=SCENES[id]; cur=id; tapTarget=null;
+  loaderEl.classList.remove('done'); lmsg.textContent='Caricamento…';
+  loader.load(S.url,(gltf)=>{
+    disposeRoot(); markersEl.innerHTML='';
+    curRoot=gltf.scene; curRoot.scale.setScalar(S.scale); scene.add(curRoot); centerRoot(curRoot, S);
+    px=S.spawn.x; pz=S.spawn.z; yaw=S.spawn.yaw; pitch=0;
+    setLoc(id); buildMarkers(); loaderEl.classList.add('done');
+    setTimeout(()=>fade.classList.remove('on'),250);
+  },(xhr)=>{ if(xhr.total>0) lmsg.textContent='Caricamento… '+Math.round(xhr.loaded/xhr.total*100)+'%'; },
+  (err)=>{ lmsg.textContent='Errore di caricamento'; console.error(err); });
+}
+function buildMarkers(){
+  markersEl.innerHTML='';
+  DOORS.filter(d=>d.from===cur).forEach(d=>{
+    const b=document.createElement('button'); b.className='marker'; b.textContent='→ '+d.label;
+    b.addEventListener('click',(e)=>{ e.stopPropagation(); goThrough(d); });
+    b.dataset.x=d.at[0]; b.dataset.z=d.at[1]; markersEl.appendChild(b);
+  });
+}
+function goThrough(d){ fade.classList.add('on'); setTimeout(()=>{ loadScene(d.to); },300); }
+const _v=new THREE.Vector3();
+function updateMarkers(){
+  const w=stage.clientWidth,h=stage.clientHeight;
+  [...markersEl.children].forEach(b=>{
+    const wx=parseFloat(b.dataset.x), wz=parseFloat(b.dataset.z);
+    _v.set(wx,1.7,wz); _v.project(camera);
+    if(_v.z>1){ b.style.display='none'; return; }
+    b.style.display='block';
+    b.style.left=((_v.x*0.5+0.5)*w)+'px'; b.style.top=((-_v.y*0.5+0.5)*h)+'px';
+  });
+}
+/* tap-to-move + drag-to-look */
+let looking=false,lx=0,ly=0,pd=null;
+const ndc=new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown',(e)=>{ looking=true; lx=e.clientX; ly=e.clientY; pd={x:e.clientX,y:e.clientY,t:performance.now()}; });
+addEventListener('pointerup',(e)=>{
+  looking=false;
+  if(pd){
+    const moved=Math.hypot(e.clientX-pd.x,e.clientY-pd.y);
+    if(moved<12 && performance.now()-pd.t<400) tryTapMove(e.clientX,e.clientY);
+    pd=null;
+  }
+});
+addEventListener('pointermove',(e)=>{
+  if(!looking||!pd) return;
+  yaw-=(e.clientX-lx)*0.0042; pitch-=(e.clientY-ly)*0.0032;
+  pitch=Math.max(-1.2,Math.min(1.2,pitch)); lx=e.clientX; ly=e.clientY;
+});
+function tryTapMove(cx,cy){
+  const r=renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx-r.left)/r.width)*2-1, -((cy-r.top)/r.height)*2+1);
+  raycaster.setFromCamera(ndc,camera);
+  const o=raycaster.ray.origin, d=raycaster.ray.direction;
+  if(d.y<-0.05){
+    const t=-o.y/d.y, S=SCENES[cur], b=S.bounds;
+    const tx=Math.max(b[0],Math.min(b[2],o.x+d.x*t)), tz=Math.max(b[1],Math.min(b[3],o.z+d.z*t));
+    tapTarget={x:tx,z:tz}; showTapDot(cx,cy);
+  }
+}
+function showTapDot(cx,cy){
+  const r=stage.getBoundingClientRect(), el=document.createElement('div');
+  el.className='tapdot'; el.style.left=(cx-r.left)+'px'; el.style.top=(cy-r.top)+'px';
+  stage.appendChild(el); setTimeout(()=>el.remove(),850);
+}
+addEventListener('keydown',(e)=>{ keys[e.key.toLowerCase()]=true; tapTarget=null; });
+addEventListener('keyup',(e)=>{ keys[e.key.toLowerCase()]=false; });
+
+const clock=new THREE.Clock();
+let lastW=0,lastH=0;
+function fitStage(){
+  const w=stage.clientWidth,h=stage.clientHeight;
+  if(w>0&&h>0&&(w!==lastW||h!==lastH)){ lastW=w; lastH=h; renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+}
+function tick(){
+  requestAnimationFrame(tick); fitStage();
+  const dt=Math.min(clock.getDelta(),0.05), S=SCENES[cur];
+  if(S&&loaderEl.classList.contains('done')){
+    let mx=0,mz=0;
+    if(keys['w']||keys['arrowup'])mz+=1; if(keys['s']||keys['arrowdown'])mz-=1;
+    if(keys['a']||keys['arrowleft'])mx-=1; if(keys['d']||keys['arrowright'])mx+=1;
+    if(tapTarget){
+      const dx=tapTarget.x-px, dz=tapTarget.z-pz, dist=Math.hypot(dx,dz);
+      if(dist<0.25) tapTarget=null;
+      else{ const fx=-Math.sin(yaw),fz=-Math.cos(yaw),rx=Math.cos(yaw),rz=-Math.sin(yaw);
+        mx=(dx*rx+dz*rz)/dist; mz=(dx*fx+dz*fz)/dist; }
+    }
+    const l=Math.hypot(mx,mz); if(l>1){mx/=l;mz/=l;}
+    const sp=2.4*dt, sy=Math.sin(yaw),cy=Math.cos(yaw);
+    px+=(mx*cy-mz*sy)*sp; pz+=(-mx*sy-mz*cy)*sp;
+    const b=S.bounds;
+    px=Math.max(b[0],Math.min(b[2],px)); pz=Math.max(b[1],Math.min(b[3],pz));
+    camera.position.set(px,S.eye,pz);
+    camera.rotation.order='YXZ'; camera.rotation.y=yaw; camera.rotation.x=pitch;
+    updateMarkers();
+  }
+  renderer.render(scene,camera);
+}
+fitStage(); loadScene('esterno'); tick();
+</script>
+</body>
+</html>
