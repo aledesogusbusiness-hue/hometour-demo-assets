@@ -16,7 +16,7 @@
   #move { right:12px; bottom:76px; display:grid; grid-template-columns:52px 52px; gap:8px; }
   .mbtn { width:52px; height:52px; border-radius:50%; background:rgba(16,20,28,.78); border:1px solid rgba(255,255,255,.25); color:#fff; font-size:20px; backdrop-filter: blur(4px); touch-action:none; user-select:none; -webkit-user-select:none; }
   .mbtn:active { background:#2f6fed; }
-  #tools { top:10px; right:12px; display:flex; gap:6px; }
+  #tools { top:10px; right:12px; display:flex; gap:6px; z-index:30; }
   .tbtn { background:rgba(16,20,28,.78); border:1px solid rgba(255,255,255,.25); color:#fff; padding:8px 11px; border-radius:10px; font-size:13px; }
   #loader { position:fixed; inset:0; z-index:20; background:rgba(7,9,13,.92); color:#e8ecf2; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center; }
   #loader h1 { font-size:19px; margin:0 0 6px; }
@@ -26,7 +26,7 @@
   #status { font-size:13px; line-height:1.7; text-align:left; min-height:110px; }
   #status .ok { color:#7ee2a0; } #status .err { color:#ff8f8f; } #status .wait { color:#9fb0c7; }
   #errBox { display:none; margin-top:12px; background:#3a1420; border:1px solid #8a2f45; color:#ffd7de; padding:10px 12px; border-radius:10px; font-size:13px; max-width:440px; white-space:pre-wrap; }
-  #diag { position:fixed; z-index:15; top:52px; right:12px; width:min(320px,86vw); background:rgba(10,13,18,.92); color:#dbe4f0; border:1px solid rgba(255,255,255,.18); border-radius:12px; padding:12px 14px; font-size:12.5px; line-height:1.65; display:none; }
+  #diag { position:fixed; z-index:30; top:52px; right:12px; width:min(320px,86vw); background:rgba(10,13,18,.92); color:#dbe4f0; border:1px solid rgba(255,255,255,.18); border-radius:12px; padding:12px 14px; font-size:12.5px; line-height:1.65; display:none; }
   #diag b { color:#fff; }
 </style>
 <script type="importmap">
@@ -95,7 +95,16 @@ async function main() {
   // --- cornice del mondo: livella la scena (up dai dati del tour) e adatta gli assi ---
   const upArr = manifest.up;
   const up = new pc.Vec3(upArr[0], upArr[1], upArr[2]).normalize();
-  const qLevel = new pc.Quat().setFromUnitVectors(up, new pc.Vec3(0, -1, 0));
+  function quatFromUnitVectors(a, b) {
+    const q = new pc.Quat(
+      a.y * b.z - a.z * b.y,
+      a.z * b.x - a.x * b.z,
+      a.x * b.y - a.y * b.x,
+      1 + a.x * b.x + a.y * b.y + a.z * b.z);
+    q.normalize();
+    return q;
+  }
+  const qLevel = quatFromUnitVectors(up, new pc.Vec3(0, -1, 0));
   const qFlipX = new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), 180);
   const qWorld = qFlipX.clone().mul(qLevel);
   const mWorld = new pc.Mat4().setFromQuat(qWorld);
