@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>BNB Santa Teresa — Splat completo</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#0b0e13; font-family: system-ui, -apple-system, sans-serif; }
+  #app { position:fixed; inset:0; touch-action:none; }
+  .hud { position:fixed; z-index:10; color:#fff; }
+  #title { top:10px; left:12px; font-size:15px; font-weight:600; text-shadow:0 1px 4px rgba(0,0,0,.8); pointer-events:none; }
+  #title small { display:block; font-weight:400; font-size:12px; opacity:.85; }
+  #rooms { left:50%; transform:translateX(-50%); bottom:14px; display:flex; gap:6px; flex-wrap:wrap; justify-content:center; width:max-content; max-width:96vw; }
+  .chip { background:rgba(16,20,28,.78); border:1px solid rgba(255,255,255,.25); color:#fff; padding:9px 13px; border-radius:999px; font-size:14px; backdrop-filter: blur(4px); }
+  .chip:active { background:#2f6fed; }
+  #move { right:12px; bottom:76px; display:grid; grid-template-columns:52px 52px; gap:8px; }
+  .mbtn { width:52px; height:52px; border-radius:50%; background:rgba(16,20,28,.78); border:1px solid rgba(255,255,255,.25); color:#fff; font-size:20px; backdrop-filter: blur(4px); touch-action:none; user-select:none; -webkit-user-select:none; }
+  .mbtn:active { background:#2f6fed; }
+  #tools { top:10px; right:12px; display:flex; gap:6px; }
+  .tbtn { background:rgba(16,20,28,.78); border:1px solid rgba(255,255,255,.25); color:#fff; padding:8px 11px; border-radius:10px; font-size:13px; }
+  #loader { position:fixed; inset:0; z-index:20; background:rgba(7,9,13,.92); color:#e8ecf2; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px; text-align:center; }
+  #loader h1 { font-size:19px; margin:0 0 6px; }
+  #loader p { margin:0 0 16px; font-size:14px; opacity:.85; max-width:420px; }
+  #barWrap { width:min(420px,84vw); height:8px; background:#232a36; border-radius:99px; overflow:hidden; margin-bottom:14px; }
+  #bar { height:100%; width:0%; background:#2f6fed; transition:width .2s; }
+  #status { font-size:13px; line-height:1.7; text-align:left; min-height:110px; }
+  #status .ok { color:#7ee2a0; } #status .err { color:#ff8f8f; } #status .wait { color:#9fb0c7; }
+  #errBox { display:none; margin-top:12px; background:#3a1420; border:1px solid #8a2f45; color:#ffd7de; padding:10px 12px; border-radius:10px; font-size:13px; max-width:440px; white-space:pre-wrap; }
+  #diag { position:fixed; z-index:15; top:52px; right:12px; width:min(320px,86vw); background:rgba(10,13,18,.92); color:#dbe4f0; border:1px solid rgba(255,255,255,.18); border-radius:12px; padding:12px 14px; font-size:12.5px; line-height:1.65; display:none; }
+  #diag b { color:#fff; }
+</style>
+<script type="importmap">
+{ "imports": { "playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas@2/build/playcanvas.mjs" } }
+</script>
+</head>
+<body>
+<canvas id="app"></canvas>
+
+<div class="hud" id="title">BNB Santa Teresa — splat completo<small>Trascina per guardarti intorno · tasti a destra per muoverti</small></div>
+<div class="hud" id="tools">
+  <button class="tbtn" id="flipBtn">↕ Capovolgi</button>
+  <button class="tbtn" id="diagBtn">Stato</button>
+</div>
+<div class="hud" id="rooms"></div>
+<div class="hud" id="move">
+  <button class="mbtn" id="btnUp">↑</button>
+  <button class="mbtn" id="btnFwd">▲</button>
+  <button class="mbtn" id="btnDown">↓</button>
+  <button class="mbtn" id="btnBack">▼</button>
+</div>
+
+<div id="diag"></div>
+
+<div id="loader">
+  <h1>BNB Santa Teresa</h1>
+  <p>Carico lo splat completo dell'appartamento (tutte le stanze insieme, ~2,7 milioni di gaussiane). La connessione deve scaricare circa 29 MB: la prima apertura richiede un po' di pazienza.</p>
+  <div id="barWrap"><div id="bar"></div></div>
+  <div id="status"></div>
+  <div id="errBox"></div>
+</div>
+
+<script type="module">
+import * as pc from 'playcanvas';
+
+const $ = id => document.getElementById(id);
+const diagLines = [];
+function diag(html) { diagLines.push(html); $('diag').innerHTML = '<b>Diagnostica</b><br>' + diagLines.join('<br>'); }
+function showError(msg) { const e = $('errBox'); e.style.display = 'block'; e.textContent = msg; diag('<span style="color:#ff8f8f">ERRORE: ' + msg + '</span>'); }
+window.addEventListener('error', ev => showError('Errore: ' + (ev.message || ev.type)));
+
+const statusEls = {};
+let totalChunks = 0, doneChunks = 0;
+function setStatus(id, text, cls) { if (statusEls[id]) { statusEls[id].textContent = text; statusEls[id].className = cls || ''; } }
+function progress() { $('bar').style.width = (totalChunks ? Math.round(100 * doneChunks / totalChunks) : 0) + '%'; }
+
+async function main() {
+  if (!window.WebGL2RenderingContext && !window.WebGLRenderingContext) throw new Error('WebGL non disponibile su questo browser.');
+  const manifest = await (await fetch('manifest.json')).json();
+  totalChunks = manifest.rooms.reduce((s, r) => s + r.chunks, 0);
+  const st = $('status');
+  for (const r of manifest.rooms) {
+    const d = document.createElement('div');
+    d.innerHTML = r.label + ': <span class="wait">in attesa…</span>';
+    st.appendChild(d); statusEls[r.id] = d.querySelector('span');
+  }
+  diag('WebGL: ' + (!!window.WebGLRenderingContext ? 'ok' : 'assente') + ' · Stanze: ' + manifest.rooms.length + ' · Pezzi da scaricare: ' + totalChunks);
+
+  const canvas = $('app');
+  const app = new pc.Application(canvas, { graphicsDeviceOptions: { antialias: false, alpha: false } });
+  app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
+  app.setCanvasResolution(pc.RESOLUTION_AUTO);
+  app.start();
+  diag('Motore grafico avviato.');
+
+  // --- cornice del mondo: livella la scena (up dai dati del tour) e adatta gli assi ---
+  const upArr = manifest.up;
+  const up = new pc.Vec3(upArr[0], upArr[1], upArr[2]).normalize();
+  const qLevel = new pc.Quat().setFromUnitVectors(up, new pc.Vec3(0, -1, 0));
+  const qFlipX = new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), 180);
+  const qWorld = qFlipX.clone().mul(qLevel);
+  const mWorld = new pc.Mat4().setFromQuat(qWorld);
+  const toWorld = v => mWorld.transformPoint(new pc.Vec3(v[0], v[1], v[2]));
+
+  const flipRoot = new pc.Entity('flipRoot'); app.root.addChild(flipRoot);
+  const splatRoot = new pc.Entity('splatRoot'); splatRoot.setLocalRotation(qWorld); flipRoot.addChild(splatRoot);
+
+  // --- camera ---
+  const camera = new pc.Entity('camera');
+  camera.addComponent('camera', { clearColor: new pc.Color(0.04, 0.05, 0.07), fov: 72, nearClip: 0.05, farClip: 300 });
+  flipRoot.addChild(camera);
+
+  const views = {};
+  for (const r of manifest.rooms) {
+    const eye = toWorld(r.eye);
+    const fwd = mWorld.transformVector(new pc.Vec3(r.forward[0], r.forward[1], r.forward[2])).normalize();
+    views[r.id] = { eye, target: eye.clone().add(fwd) };
+  }
+  function applyView(v, instant) {
+    const q = new pc.Quat();
+    new pc.Mat4().setLookAt(v.eye, v.target, new pc.Vec3(0, 1, 0)).getQuat(q);
+    // setLookAt orienta +Z verso il target: per la camera serve il verso opposto
+    const back = new pc.Quat().setFromAxisAngle(new pc.Vec3(0, 1, 0), 180);
+    const qCam = back.mul(q);
+    if (instant) { camera.setLocalPosition(v.eye); camera.setLocalRotation(qCam); }
+    else glide = { p0: camera.getLocalPosition().clone(), p1: v.eye, q0: camera.getLocalRotation().clone(), q1: qCam, t: 0 };
+  }
+  let glide = null;
+  applyView(views['Living_room'] || views[manifest.rooms[0].id], true);
+
+  // limiti di movimento (bbox trasformata)
+  const bb = manifest.bbox, corners = [];
+  for (const x of [bb.min[0], bb.max[0]]) for (const y of [bb.min[1], bb.max[1]]) for (const z of [bb.min[2], bb.max[2]]) corners.push(toWorld([x, y, z]));
+  const wMin = new pc.Vec3(Math.min(...corners.map(c => c.x)) - 1.5, Math.min(...corners.map(c => c.y)) - 0.5, Math.min(...corners.map(c => c.z)) - 1.5);
+  const wMax = new pc.Vec3(Math.max(...corners.map(c => c.x)) + 1.5, Math.max(...corners.map(c => c.y)) + 1.5, Math.max(...corners.map(c => c.z)) + 1.5);
+  diag('Limiti mondo: ' + wMin.toString() + ' → ' + wMax.toString());
+
+  // --- caricamento stanze (riassembla i pezzi base64) ---
+  function b64ToBytes(b64) {
+    const bin = atob(b64); const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function loadRoom(r) {
+    try {
+      setStatus(r.id, 'scarico i pezzi…', 'wait');
+      let b64 = '';
+      for (let i = 0; i < r.chunks; i++) {
+        const resp = await fetch('data/' + r.id + '.b64.' + String(i).padStart(2, '0'));
+        if (!resp.ok) throw new Error('pezzo ' + i + ' non trovato (HTTP ' + resp.status + ')');
+        b64 += await resp.text();
+        doneChunks++; progress();
+        setStatus(r.id, 'scarico… ' + (i + 1) + '/' + r.chunks, 'wait');
+      }
+      setStatus(r.id, 'preparo la scena…', 'wait');
+      const bytes = b64ToBytes(b64); b64 = '';
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+      await new Promise((resolve, reject) => {
+        const asset = new pc.Asset(r.id, 'gsplat', { url, filename: r.id + '.sog' });
+        asset.on('load', () => {
+          const e = new pc.Entity(r.id);
+          e.addComponent('gsplat', { asset });
+          splatRoot.addChild(e);
+          resolve();
+        });
+        asset.on('error', err => reject(new Error('lettura splat: ' + err)));
+        app.assets.add(asset); app.assets.load(asset);
+      });
+      setStatus(r.id, 'pronta ✓', 'ok');
+      diag(r.label + ': caricata (' + r.bytes.toLocaleString('it-IT') + ' byte)');
+    } catch (e) {
+      setStatus(r.id, 'errore: ' + e.message, 'err');
+      diag(r.label + ': <span style="color:#ff8f8f">' + e.message + '</span>');
+    }
+  }
+  const loadAll = (async () => {
+    for (const r of manifest.rooms) await loadRoom(r);
+    diag('Caricamento completato.');
+    setTimeout(() => { $('loader').style.display = 'none'; }, 900);
+  })();
+
+  // --- controlli ---
+  const roomsBar = $('rooms');
+  for (const r of manifest.rooms) {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = r.label;
+    b.onclick = () => applyView(views[r.id], false);
+    roomsBar.appendChild(b);
+  }
+  let dragging = false, lx = 0, ly = 0;
+  canvas.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; glide = null; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+    const q = camera.getLocalRotation().clone();
+    const yaw = new pc.Quat().setFromAxisAngle(new pc.Vec3(0, 1, 0), -dx * 0.22);
+    const pitch = new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), -dy * 0.22);
+    camera.setLocalRotation(yaw.mul(q).mul(pitch));
+  });
+  const endDrag = () => dragging = false;
+  canvas.addEventListener('pointerup', endDrag); canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', e => { e.preventDefault(); camera.translateLocal(0, 0, e.deltaY * 0.002); }, { passive: false });
+
+  const held = { fwd: false, back: false, up: false, down: false };
+  function bindHold(id, key) {
+    const el = $(id);
+    const on = e => { e.preventDefault(); held[key] = true; };
+    const off = () => held[key] = false;
+    el.addEventListener('pointerdown', on);
+    el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off);
+  }
+  bindHold('btnFwd', 'fwd'); bindHold('btnBack', 'back'); bindHold('btnUp', 'up'); bindHold('btnDown', 'down');
+
+  let flipped = false;
+  $('flipBtn').onclick = () => { flipped = !flipped; flipRoot.setLocalEulerAngles(flipped ? 180 : 0, 0, 0); diag('Vista capovolta: ' + (flipped ? 'sì' : 'no')); };
+  $('diagBtn').onclick = () => { const d = $('diag'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; };
+
+  app.on('update', dt => {
+    if (glide) {
+      glide.t = Math.min(1, glide.t + dt / 1.15);
+      const t = glide.t, s = t * t * (3 - 2 * t);
+      camera.setLocalPosition(new pc.Vec3().lerp(glide.p0, glide.p1, s));
+      const q = new pc.Quat(); q.slerp(glide.q0, glide.q1, s);
+      camera.setLocalRotation(q);
+      if (t >= 1) glide = null;
+    }
+    const sp = 1.25 * dt;
+    if (held.fwd) camera.translateLocal(0, 0, -sp);
+    if (held.back) camera.translateLocal(0, 0, sp);
+    if (held.up) camera.translateLocal(0, sp, 0);
+    if (held.down) camera.translateLocal(0, -sp, 0);
+    const p = camera.getLocalPosition();
+    p.x = pc.math.clamp(p.x, wMin.x, wMax.x); p.y = pc.math.clamp(p.y, wMin.y, wMax.y); p.z = pc.math.clamp(p.z, wMin.z, wMax.z);
+    camera.setLocalPosition(p);
+  });
+}
+main().catch(e => { showError(e.message || String(e)); diag('Avvio fallito.'); });
+</script>
+</body>
+</html>
