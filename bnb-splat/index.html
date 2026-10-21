@@ -92,6 +92,10 @@ async function main() {
   app.start();
   diag('Motore grafico avviato.');
 
+  let flipped = false;
+  $('flipBtn').onclick = () => { flipped = !flipped; flipRoot.setLocalEulerAngles(flipped ? 180 : 0, 0, 0); diag('Vista capovolta: ' + (flipped ? 'sì' : 'no')); };
+  $('diagBtn').onclick = () => { const d = $('diag'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; };
+
   // --- cornice del mondo: livella la scena (up dai dati del tour) e adatta gli assi ---
   const upArr = manifest.up;
   const up = new pc.Vec3(upArr[0], upArr[1], upArr[2]).normalize();
@@ -107,7 +111,21 @@ async function main() {
   const qLevel = quatFromUnitVectors(up, new pc.Vec3(0, -1, 0));
   const qFlipX = new pc.Quat().setFromAxisAngle(new pc.Vec3(1, 0, 0), 180);
   const qWorld = qFlipX.clone().mul(qLevel);
-  const mWorld = new pc.Mat4().setFromQuat(qWorld);
+  function matFromQuat(q) {
+    const m = new pc.Mat4();
+    const x = q.x, y = q.y, z = q.z, w = q.w;
+    const x2 = x + x, y2 = y + y, z2 = z + z;
+    const xx = x * x2, xy = x * y2, xz = x * z2;
+    const yy = y * y2, yz = y * z2, zz = z * z2;
+    const wx = w * x2, wy = w * y2, wz = w * z2;
+    m.data.set([
+      1 - (yy + zz), xy + wz, xz - wy, 0,
+      xy - wz, 1 - (xx + zz), yz + wx, 0,
+      xz + wy, yz - wx, 1 - (xx + yy), 0,
+      0, 0, 0, 1]);
+    return m;
+  }
+  const mWorld = matFromQuat(qWorld);
   const toWorld = v => mWorld.transformPoint(new pc.Vec3(v[0], v[1], v[2]));
 
   const flipRoot = new pc.Entity('flipRoot'); app.root.addChild(flipRoot);
@@ -125,13 +143,18 @@ async function main() {
     views[r.id] = { eye, target: eye.clone().add(fwd) };
   }
   function applyView(v, instant) {
-    const q = new pc.Quat();
-    new pc.Mat4().setLookAt(v.eye, v.target, new pc.Vec3(0, 1, 0)).getQuat(q);
-    // setLookAt orienta +Z verso il target: per la camera serve il verso opposto
-    const back = new pc.Quat().setFromAxisAngle(new pc.Vec3(0, 1, 0), 180);
-    const qCam = back.mul(q);
-    if (instant) { camera.setLocalPosition(v.eye); camera.setLocalRotation(qCam); }
-    else glide = { p0: camera.getLocalPosition().clone(), p1: v.eye, q0: camera.getLocalRotation().clone(), q1: qCam, t: 0 };
+    if (instant) {
+      camera.setLocalPosition(v.eye);
+      camera.lookAt(v.target.x, v.target.y, v.target.z, 0, 1, 0);
+    } else {
+      const tmp = new pc.Entity();
+      flipRoot.addChild(tmp);
+      tmp.setLocalPosition(v.eye);
+      tmp.lookAt(v.target.x, v.target.y, v.target.z, 0, 1, 0);
+      const q1 = tmp.getLocalRotation().clone();
+      tmp.destroy();
+      glide = { p0: camera.getLocalPosition().clone(), p1: v.eye.clone(), q0: camera.getLocalRotation().clone(), q1, t: 0 };
+    }
   }
   let glide = null;
   applyView(views['Living_room'] || views[manifest.rooms[0].id], true);
@@ -218,10 +241,6 @@ async function main() {
     el.addEventListener('pointerup', off); el.addEventListener('pointerleave', off); el.addEventListener('pointercancel', off);
   }
   bindHold('btnFwd', 'fwd'); bindHold('btnBack', 'back'); bindHold('btnUp', 'up'); bindHold('btnDown', 'down');
-
-  let flipped = false;
-  $('flipBtn').onclick = () => { flipped = !flipped; flipRoot.setLocalEulerAngles(flipped ? 180 : 0, 0, 0); diag('Vista capovolta: ' + (flipped ? 'sì' : 'no')); };
-  $('diagBtn').onclick = () => { const d = $('diag'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; };
 
   app.on('update', dt => {
     if (glide) {
